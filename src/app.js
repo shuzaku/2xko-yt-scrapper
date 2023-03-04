@@ -1,33 +1,17 @@
 //controllers
-let accountController = require("../controller/accounts");
-let characterController = require("../controller/characters");
-let comboController = require("../controller/combos");
-let comboClipController = require("../controller/combo-clip");
-let creatorController = require("../controller/creators");
-let gameController = require("../controller/games");
-let playerController = require("../controller/players");
-let tagController = require("../controller/tags");
-let tournamentController = require("../controller/tournaments");
-let videoController = require("../controller/videos");
-let searchController = require("../controller/searches");
-let matchController = require("../controller/matches");
-let collectionController = require("../controller/collections");
-let montageController = require("../controller/montages");
-let moveController = require("../controller/moves");
-let noteController = require("../controller/notes");
-let characterMatchupController = require("../controller/character-matchups");
-
-let ratingUpdateScrapperController = require("../controller/scrapper");
-
-
+var Player = require("../models/players");
+var Character = require("../models/characters");
+var Creator = require("../models/creators");
+var Match = require("../models/matches");
+var Video = require("../models/videos")
+var ObjectId = require('mongodb').ObjectId;
 var moment = require('moment'); // require
-const schedule = require('node-schedule');
-const cheerio = require('cheerio');
 
 const express = require('express')
 const bodyParser = require('body-parser')
 const morgan = require('morgan')
 const cors = require('cors')
+var backup = require('mongodb-backup');
 
 let dotenv = require('dotenv');
 dotenv.config();
@@ -45,129 +29,327 @@ var db = mongoose.connection;
 db.on("error", console.error.bind(console, "connection error"));
 db.once("open", function () {
   console.log("Connection Succeeded");
+  run();
 });
 
-// app.listen(process.env.PORT || 8081);
-app.listen(process.env.PORT || 80);   
+app.listen(process.env.PORT || 8082);
+var channel = {
+      id: ObjectId('6397febaebbedd0023fdca95'),
+      youtubeId:'UCu8olUM72Dagi8E_BoJmPrQ',
+      name: 'GGST Battle Collection',
+      channelVideos: []
+    }
 
-const rule = new schedule.RecurrenceRule();
+var characterList = [];
+var playerList = [];
+var mongoGameId = '606d42021ddff92064798667';
+// Fetch all players
 
-const job = schedule.scheduleJob({hour: 00, minute: 00}, function(){
-  console.log('job running now....');
-  ratingUpdateScrapperController.scrapeContent();
-});
+function run(){
+  getCharacters().then(()=>{
+    getPlayers().then(()=>{
+      getChannelInfo().then(()=>{
+          getVideos(channel)
+      })
+    });
+  })
+}
 
-//Accounts
-app.post('/accounts', (req, res) => accountController.addAccount(req,res));
-app.get('/accounts/:id', (req, res) => accountController.getAccount(req,res));
-app.put('/accounts/:id', (req, res) => accountController.patchAccount(req,res));
 
-//Characters
-app.post('/characters', (req, res) => characterController.addCharacter(req,res));
-app.get('/characterQuery', (req, res) => characterController.queryCharacter(req,res));
-app.get('/characters', (req, res) => characterController.getCharacters(req,res));
-app.get('/characters/:id', (req, res) => characterController.getCharacter(req,res));
-app.get('/characterSlug/:slug', (req, res) => characterController.getCharacterBySlug(req,res));
+function getVideos(channel) {
+  var route = `https://www.googleapis.com/youtube/v3/search?key=AIzaSyCYRdDi_twi0Xq-4W70LJoargI63fI6ljg&channelId=${channel.youtubeId}&part=snippet,id&order=date&maxResults=50`
+  const https = require('https');
 
-app.put('/characters/:id', (req, res) => characterController.updateCharacter(req,res));
-app.delete('/characters/:id', (req, res) => characterController.deleteCharacter(req,res));
-app.get('/characterMatchupInfo', (req, res) => characterController.getMatchupInfo(req,res));
+  console.log('scrubbing channel...')
+  https.get(route, (resp) => {
+    let data = '';
 
-//Combos
-app.post('/combos', (req, res) => comboController.addCombo(req,res));
-app.put('/combo/:id', (req, res) => comboController.patchCombo(req,res));
-app.delete('/combo/:id', (req, res) => comboController.deleteCombo(req,res));
-app.get('/comboClip/:id', (req, res) => comboClipController.getComboClip(req,res));
+    // A chunk of data has been received.
+    resp.on('data', (chunk) => {
+      data += chunk;
+    });
 
-//Creators
-app.post('/creator', (req, res) => creatorController.addCreator(req,res));
-app.get('/creators', (req, res) => creatorController.getCreators(req,res));
-app.get('/creators/:id', (req, res) => creatorController.getCreator(req,res));
-app.put('/creators/:id', (req, res) => creatorController.updateCreator(req,res));
-app.delete('/creators/:id', (req, res) => creatorController.deleteCreator(req,res));
+    // The whole response has been received. Print out the result.
+    resp.on('end', () => {
+      data = JSON.parse(data);
+      if(data){
+        console.log(`youtube data retrieved: ${data.items.length} found`)
+      }
+      var mappedVideos = data.items.map(video =>  {
+        if(video.id.kind === "youtube#video"){
+          return {
+            id: video.id.videoId,
+            title: video.snippet.title,
+            player1: {
+              id: getPlayer1Id(video.snippet.title.split("vs")[0]),
+              characterId: getPlayer1CharacterId(video.snippet.title.split("vs")[0])
+            },
+            player2: {
+              id: getPlayer2Id(video.snippet.title.split("vs")[1]),
+              characterId: getPlayer2CharacterId(video.snippet.title.split("vs")[1])
+            },
+            videoUrl: video.id.videoId,
+            gameId: ObjectId(mongoGameId),
+            publishedAt: moment(video.snippet.publishedAt)
+          }
+        }
+      });
 
-//Games
-app.post('/games', (req, res) => gameController.addGame(req,res));
-app.get('/gameQuery', (req, res) => gameController.queryGame(req,res));
-app.get('/games', (req, res) => gameController.getGames(req,res));
-app.get('/games/:id', (req, res) => gameController.getGame(req,res));
-app.put('/games/:id', (req, res) => gameController.updateGame(req,res));
-app.delete('/games/:id', (req, res) => gameController.deleteGame(req,res));
+      mappedVideos = mappedVideos.filter(v => v.publishedAt.isAfter(channel.updatedAt));
+      mappedVideos = mappedVideos.filter(v => v.player1.characterId && v.player2.characterId)
+      console.log(`adding...${mappedVideos.length} videos` )
+      if(mappedVideos.length > 0){
+        postMatches(mappedVideos.reverse());
+      }
+    });
 
-//Players
-app.post('/player', (req, res) => playerController.addPlayer(req,res));
-app.get('/playerQuery', (req, res) => playerController.queryPlayer(req,res));
-app.get('/players', (req, res) => playerController.getPlayers(req,res));
-app.get('/players/:id', (req, res) => playerController.getPlayer(req,res));
-app.put('/players/:id', (req, res) => playerController.updatePlayer(req,res));
-app.delete('/players/:id', (req, res) => playerController.deletePlayer(req,res));
-app.get('/playerSlug/:slug', (req, res) => playerController.getPlayerBySlug(req,res));
+  }).on("error", (err) => {
+    console.log("Error: " + err.message);
+  });
+}
 
-//Tags
-app.post('/tags', (req, res) => tagController.addTag(req,res));
-app.get('/tags', (req, res) => tagController.getTags(req,res));
+function getChannelInfo() {
+  console.log('getting channel info...')
+  return new Promise((resolve, reject) => {
+    Creator.find({YoutubeId: channel.youtubeId}, 'updatedAt ', function (error, contentCreator) {
+      if (error) { console.error(error); }
+        channel.updatedAt = moment(contentCreator[0].updatedAt)
+        resolve();
+      })
+  })
+};
 
-//Tournament
-app.post('/tournaments', (req, res) => tournamentController.addTournament(req,res));
-app.get('/tournamentQuery', (req, res) => tournamentController.queryTournament(req,res));
-app.get('/tournaments', (req, res) => tournamentController.getTournaments(req,res));
-app.get('/tournaments/:id', (req, res) => tournamentController.getTournament(req,res));
-app.put('/tournaments/:id', (req, res) => tournamentController.updateTournament(req,res));
-app.delete('/tournaments/:id', (req, res) => tournamentController.deleteTournament(req,res));
+function getCharacters() {
+  console.log('getting characters...')
+  return new Promise((resolve, reject) => {
+    Character.find({}, 'Name GameId ', function (error, characters) {
+      if (error) { console.error(error); }
+        characterList =  characters
+        resolve();
+      })
+  });
+};
 
-//Videos
-app.post('/video', (req, res) => videoController.addVideo(req,res));
-app.get('/videos', (req, res) => videoController.fetchVideos(req,res));
-app.get('/videoQuery', (req, res) => videoController.queryVideo(req,res));
-app.get('/videoQuery', (req, res) => videoController.queryVideo(req,res));
-app.get('/video/:id', (req, res) => videoController.getVideo(req,res));
-app.get('/videoCharacterQuery', (req, res) => videoController.queryVideoByCharacter(req,res));
-app.get('/videoPlayerQuery', (req, res) => videoController.queryVideoByPlayer(req,res));
-app.get('/videoGameQuery', (req, res) => videoController.queryVideoByGame(req,res));
-app.put('/video/:id', (req, res) => videoController.patchVideo(req,res));
-app.delete('/videos/:id', (req, res) => videoController.deleteVideo(req,res));
-app.post('/getVideos', (req, res) => videoController.getVideos(req,res));
-app.get('/comboVideo/:url', (req, res) => videoController.getComboVideo(req,res));
-app.get('/matchVideo/:url', (req, res) => videoController.getMatchVideo(req,res));
+function getPlayers() {
+  console.log('getting players...')
+  return new Promise((resolve, reject) => {
+    Player.find({}, 'Name ', function (error, players) {
+      if (error) { console.error(error); }
+        playerList =  players
+        resolve();
+      })
+  });
+};
 
-//Search
-app.get('/initialSearch', (req, res) => searchController.defaultSearch(req,res));
-app.get('/search', (req, res) => searchController.getSearchValues(req,res));
+function getPlayer1Id(title) {
+  var start = title.indexOf('[') + 1;
+  var end = (title.indexOf(']') - 1);
+  var player1Name = title.slice(start,end);
+  if(player1Name.includes('/')){
+    player1Name = player1Name.trim().split('/');
+    player1Name = player1Name[0];
+  }
 
-//Matches
-app.post('/matches', (req, res) => matchController.addMatches(req,res));
-app.get('/matches', (req, res) => matchController.getMatches(req,res));
-app.put('/matches/:id', (req, res) => matchController.patchMatch(req,res));
-app.get('/match/:id', (req, res) => matchController.getMatch(req,res));
-app.delete('/match/:id', (req, res) => matchController.deleteMatch(req,res));
-app.get('/matchQuery', (req, res) => matchController.queryMatches(req,res));
-app.put('/matches/', (req, res) => matchController.patchMatches(req,res));
-app.get('/matchesCharacter/', (req, res) => matchController.queryByCharacter(req,res));
-app.get('/matchesPlayer/', (req, res) => matchController.queryByPlayer(req,res));
-app.get('/characterMatchup', (req, res) => matchController.getMatchupVideos(req,res));
-app.get('/characterSlugMatchup', (req, res) => matchController.getSlugMatchupVideos(req,res));
-app.get('/matchesGame/', (req, res) => matchController.queryByGame(req,res));
+  var playerId = getPlayerIdByName(player1Name.trim());
+  return playerId;
+};
 
-//Collections
-app.post('/collections', (req, res) => collectionController.addCollection(req,res));
-app.get('/collectionQuery', (req, res) => collectionController.queryCollection(req,res));
-app.put('/collections/:id', (req, res) => collectionController.patchCollection(req,res));
-app.get('/collection/:id', (req, res) => collectionController.getCollection(req,res));
+function getPlayer2Id(title) {
+  var start = title.indexOf('[') + 1;
+  var end = (title.indexOf(']') - 1);
+  var player2Name = title.slice(start,end);
+  if(player2Name.includes('/')){
+    player2Name = player2Name.trim().split('/');
+    player2Name = player2Name[0];
+  }
 
-//Montages
-app.post('/montages', (req, res) => montageController.addMontage(req,res));
-app.get('/montage/:id', (req, res) => montageController.getMontage(req,res));
+  var playerId = getPlayerIdByName(player2Name.trim());
+  return playerId;
+};
 
-//Moves
-app.get('/characterMoves/:id', (req, res) => moveController.getCharacterMoves(req,res));
+function getPlayer1CharacterId(title){
+  var indexOfFirstSlash = title.indexOf('/');
+  var indexOfFirstBracket = title.indexOf('】');
+  var newTitle = title.split('');
+  newTitle[indexOfFirstSlash] = ' / ';
+  newTitle[indexOfFirstBracket] = '】 ';
+  newTitle = newTitle.join('');
+  var splitTitle = newTitle.split(' ').filter(t=>t !=='');
+  var indexOfSlash = splitTitle.indexOf('/');
+  var name1 = splitTitle[indexOfSlash -1];
+  var name2 = splitTitle[indexOfSlash + 1];
+  var characterId = getCharacterIdByName(name1.trim()) || getCharacterIdByName(name2.trim());
+  return characterId;
+}
 
-//Notes
-app.post('/notes', (req, res) => noteController.addNote(req,res));
-app.get('/noteQuery', (req, res) => noteController.queryNote(req,res));
-app.get('/notes', (req, res) => noteController.getNotes(req,res));
-app.get('/notes/:id', (req, res) => noteController.getNote(req,res));
-app.put('/notes/:id', (req, res) => noteController.updateNote(req,res));
-app.delete('/notes/:id', (req, res) => noteController.deleteNote(req,res));
+function getPlayer2CharacterId(title){
+  var indexForAdditionalSpacing = title.indexOf('/');
+  var newTitle = title.split('');
+  newTitle[indexForAdditionalSpacing] = ' / ';
+  newTitle = newTitle.join('');
+  var splitTitle = newTitle.split(' ').filter(t=>t !== '');
+  var indexOfSlash = splitTitle.indexOf('/');
+  var name1 = splitTitle[indexOfSlash -1];
+  var name2 = splitTitle[indexOfSlash + 1];
+  var characterId = getCharacterIdByName(name1.trim()) || getCharacterIdByName(name2.trim());
+  return characterId;
+}
 
-//Matchups
-app.get('/characterMatchupStat/', (req, res) => characterMatchupController.queryCharacterMatchup(req,res));
+function getPlayerIdByName(name) {
+  var player = playerList.filter(p => p.Name.toLowerCase() === name.toLowerCase())[0];
+  var playerId =  null;
+  if(player){
+    playerId = player._id;
+  } else {
+    addPlayer(name).then((id)=> {
+      playerid = id;
+    });
+  }
+
+  return playerId
+}
+
+function getCharacterIdByName(name) {
+  var character = characterList.filter(c => c.GameId === mongoGameId && c.Name.toLowerCase().includes(name.toLowerCase()))[0];
+  var characterId = false;
+  if(character){
+    var characterId = character._id;
+  }
+  else {
+    if(name.toLowerCase() === 'zato=1' ){
+      var characterId = '606d42021ddff9206479866e';
+    }
+
+    if(name.toLowerCase() === 'jack-o&#39;'){
+      var characterId = '612c2d1d3b6e7a7404e22d99';
+    }
+
+    if(name.toLowerCase() === 'happychaos'){
+      var characterId = '61d0e09dff98265430e0cc1f';
+    }
+  }
+  return characterId
+}
+
+function addPlayer(playerName){
+
+  return new Promise((reject) => {
+    var formattedName = playerName.replace(/ /g, '').replace('-','').replace('_','');
+    var randomNumber = Math.floor(1000 + Math.random() * 9000);
+
+    var slug  = `${formattedName.toLowerCase()}-${randomNumber}`;
+
+    var new_player = new Player({
+      Name: playerName,
+      Slug: slug
+    })
+
+    new_player.save(function (error, player) {
+        if (error) {
+          console.log(error)
+          reject();
+        }
+        return player._id
+
+    })
+  });
+}
+
+function postMatches (matches){
+  var matches = matches.map(match =>{
+    return new Match({
+      VideoUrl: match.videoUrl,
+      GameId: match.gameId,
+      Team1Players: [
+        {
+          Slot:1,
+          Id: ObjectId(match.player1.id),
+          CharacterIds: [ObjectId(match.player1.characterId)],
+        }
+      ],
+      Team2Players: [
+        {
+          Slot:2,
+          Id: ObjectId(match.player2.id),
+          CharacterIds: [ObjectId(match.player2.characterId)],
+        }
+      ],
+      SubmittedBy: ObjectId('6314df6cc141db206893b6a7'),
+      UpdatedBy: ObjectId('6314df6cc141db206893b6a7'),
+    })
+  })
+
+  
+  matches = matches.filter(match => {
+    var hasIds = match.Team1Players[0].Id && match.Team2Players[0].Id;
+    var hasCharacterIds = match.Team1Players[0].CharacterIds.length > 0 && match.Team2Players[0].CharacterIds.length > 0
+    return hasIds && hasCharacterIds
+  })
+  
+  matches.sort((a, b) => moment(a.UpdatedBy).diff(moment(b.UpdatedBy)))
+    sendMatches(matches).then( ()=>{
+      postVideos(matches).then( ()=>{
+         updateChannel(matches[matches.length-1].VideoUrl).then(()=>{
+          console.log('Done...app')
+        })
+      })
+    })
+}
+
+function sendMatches(matches){
+  console.log(`saving matches`)
+  return new Promise((resolve, reject) => {
+    Match.insertMany(matches, function(error){
+      if (error) {
+        console.log(error)
+        reject(); 
+      }
+      resolve();
+    }); 
+  });
+}
+
+function postVideos(matches){
+  console.log(`saving videos `)
+  return new Promise((resolve, reject) => {
+    var videos = matches.map(match => {
+      return {
+        Url: match.VideoUrl,
+        ContentType: "Match",
+        VideoType: "youtube",
+        GameId:  match.GameId,
+        ContentCreatorId: channel.id
+      }
+    })
+
+    Video.insertMany(videos, function(error,videos){
+      if (error) {
+        console.log(error);
+        reject();
+      }
+      resolve();
+    })    
+  });
+}
+
+function updateChannel(videoUrl){
+  console.log(`updating channel`)
+
+  return new Promise((resolve, reject) => {
+    Creator.findById(channel.id, 'Name YoutubeUrl YoutubeId LogoUrl LastVideoId', function (error, creator) {
+      if (error) { console.error(error); }
+        creator.LastVideoId = videoUrl;
+        creator.updatedAt = moment();
+        creator.save(function (error) {
+          if (error) {
+            console.log(error)
+            reject();
+          }
+          resolve();
+        })
+    })
+  }); 
+}
+
+// app.listen(process.env.PORT || 80);   
+

@@ -11,6 +11,9 @@ var PlayerSchema = new Schema({
   },
   Slug: {
     type: String
+  },
+  MatchupAppearance: {
+    type: Number
   }
 }, {
   timestamps: true, 

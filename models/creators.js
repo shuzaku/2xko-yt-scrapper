@@ -14,6 +14,9 @@ var CreatorsSchema = new Schema({
   },
   YoutubeId: {
     type: String
+  },
+  LastVideoId: {
+    type: String
   }
 }, {
   timestamps: true, 
