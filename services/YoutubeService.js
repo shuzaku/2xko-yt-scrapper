@@ -10,15 +10,28 @@ const https = require('https'); // <-- Add this at the top
  */
 function getVideos(channel) {
   return new Promise((resolve, reject) => {
-    const maxResults = 10;
+
+    const maxResults = 50;
     var routeMedium = `https://www.googleapis.com/youtube/v3/search?key=AIzaSyBxA-A4ivOENnpEVYgHompe5dVVkCjPPNY&channelId=${channel.youtubeId}&part=snippet,id&order=date&type=video&videoDuration=medium&maxResults=${maxResults}`;
     var routeLong = `https://www.googleapis.com/youtube/v3/search?key=AIzaSyBxA-A4ivOENnpEVYgHompe5dVVkCjPPNY&channelId=${channel.youtubeId}&part=snippet,id&order=date&type=video&videoDuration=long&maxResults=${maxResults}`;
 
     let videos = [];
-    let count = 0;
 
+    getYtVideos(routeMedium, 'medium').then(mediumResponse => {
+      videos.push(...mediumResponse);
+      getYtVideos(routeLong, 'long').then(longResponse => {
+        videos.push(...longResponse);
+        console.log(`youtube total data retrieved: ${videos.length} found`);
+        resolve(videos)
+      })
+    })
+  });
+}
+
+function getYtVideos(route, label) {
+  return new Promise((resolve, reject) => {
     // scrubbing channel...
-    https.get(routeMedium, (resp) => {
+    https.get(route, (resp) => {
       let data = '';
 
       // A chunk of data has been received.
@@ -30,41 +43,16 @@ function getVideos(channel) {
       resp.on('end', () => {
         try {
           data = JSON.parse(data);
-          count += data.items.length
-          videos.push(...data.items);
-        } catch (err) {
-          console.log("Error parsing JSON: " + err.message);
-          reject(err);
-        }
-      });
-
-    }).on("error", (err) => {
-      console.log("Error: " + err.message);
-      reject(err);
-    });
-
-    https.get(routeLong, (resp) => {
-      let data = '';
-
-      // A chunk of data has been received.
-      resp.on('data', (chunk) => {
-        data += chunk;
-      });
-
-      resp.on('end', () => {
-        try {
-          data = JSON.parse(data);
           if (data.items) {
-            videos.push(...data.items); // <-- Fix: flatten array
-            count += data.items.length;
-            console.log(`youtube data retrieved: ${count} found`);
+            console.log(`youtube ${label} data retrieved: ${data.items.length} found`);
+            resolve(data.items); // <-- Fix: flatten array
           }
-          resolve(videos);
         } catch (err) {
-          console.log("Error parsing JSON: " + err.message);
+          console.log(`Error parsing ${label} duration JSON: ${err.message}`);
           reject(err);
         }
       });
+
     }).on("error", (err) => {
       console.log("Error: " + err.message);
       reject(err);
